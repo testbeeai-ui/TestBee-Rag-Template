@@ -1,0 +1,7 @@
+chromadb
+sentence-transformers
+docling
+python-dotenv
+python-telegram-bot
+pydantic
+supabase

@@ -1,0 +1,7 @@
+.env
+venv312/
+__pycache__/
+*.pyc
+data/vector_store/
+data/models/
+data/raw_pdfs/
