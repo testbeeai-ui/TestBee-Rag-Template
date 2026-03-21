@@ -1,0 +1,11 @@
+# Setup: copy this file to "agency-agents.path" (same folder as this example).
+# Put EXACTLY ONE non-comment line: the absolute path to the folder that contains
+# your agent *.md files (no quotes).
+#
+# Examples (Windows — use your real path):
+#   C:\Users\rentk\Dev\agency-agents
+#   C:\Users\rentk\Dev\agency-agents\agents
+#
+# Examples (macOS/Linux):
+#   /home/you/repos/agency-agents
+#   /home/you/repos/agency-agents/agents

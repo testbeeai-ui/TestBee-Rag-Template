@@ -38,7 +38,9 @@ MODEL_DIR        = PROJECT_ROOT / "data" / "models"   # BGE-M3 lives here
 BGE_M3_MODEL_PATH = MODEL_DIR / "bge-m3"
 
 # ---------------------------------------------------------------------------
-# ChromaDB collection name
+# ChromaDB collection name (local vector store only — not used with Supabase bot)
+# Legacy name: project ingests Physics, Chemistry, Maths; collection is shared.
+# Renaming requires re-creating or migrating the Chroma collection.
 # ---------------------------------------------------------------------------
 CHROMA_COLLECTION_NAME = "testbee_physics"
 

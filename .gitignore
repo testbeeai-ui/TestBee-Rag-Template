@@ -5,3 +5,9 @@ __pycache__/
 data/vector_store/
 data/models/
 data/raw_pdfs/
+src/__pycache__/
+*.egg-info/
+.DS_Store
+
+# Local pointer to agent markdown folder (see AGENTS.md)
+agency-agents.path

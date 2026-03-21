@@ -1,0 +1,53 @@
+---
+description: Bridge to agent markdown (agency-agents repo, agency-agents.path, or ~/.claude/agents) — use when user wants specialist agent behavior or says "use claude agents"
+alwaysApply: false
+---
+
+# Claude agents bridge (Cursor)
+
+The user keeps **agent personas** as Markdown files (YAML frontmatter + playbook). When they ask you to **use those agents**, **match a specialist**, or **run like [Agent Name]**:
+
+## 1. Resolve the agents directory (try in order)
+
+1. **`agency-agents/agents/`** inside the workspace — if it exists and contains `.md` files, use it.
+2. **`agency-agents/`** at the workspace root — if it contains `.md` files (or is the clone root), use it.
+3. **`agency-agents.path`** at the workspace root — if this file exists, read it: use the **first non-empty, non-`#` line** as an **absolute** directory path to the folder of `.md` agents.
+4. **Fallback:** `%USERPROFILE%\.claude\agents\` (Windows) or `~/.claude/agents/` (macOS/Linux).
+
+Use the **Read** / **Glob** tools on paths inside the workspace without extra permission. For paths outside the repo (step 3–4), the user may need to **allow filesystem access** when Cursor prompts.
+
+## 2. Load the agent
+
+**Read** the matching `*.md` from that directory (or search with Glob `**/*.md` under the resolved folder if unsure).
+
+## 3. Apply it
+
+Follow that file’s **frontmatter + body** for role, mission, and critical rules for the current task (one agent at a time unless the user asks for multiple passes).
+
+## Quick filename map (engineering & QA)
+
+| Task | File (in resolved agents folder) |
+|------|----------------------------------|
+| Security / threat model | `engineering-security-engineer.md` |
+| Code review | `engineering-code-reviewer.md` |
+| AI / ML / RAG | `engineering-ai-engineer.md` |
+| Backend / APIs | `engineering-backend-architect.md` |
+| Frontend | `engineering-frontend-developer.md` |
+| DevOps / CI | `engineering-devops-automator.md` |
+| Docs | `engineering-technical-writer.md` |
+| Architecture | `engineering-software-architect.md` |
+| Multi-step pipeline | `agents-orchestrator.md` |
+| API testing | `testing-api-tester.md` |
+| Accessibility | `testing-accessibility-auditor.md` |
+| Performance | `testing-performance-benchmarker.md` |
+
+For other domains, **list or search** that folder (e.g. `marketing-*`, `design-*`, `sales-*`) and pick the closest `description` in the YAML frontmatter.
+
+## Do not
+
+- Assume agents run automatically — you **read** the markdown and **embody** it for that reply or task.
+- Copy hundreds of agent files into the repo unless the user explicitly wants that.
+
+## Repo setup (for the human)
+
+See **`AGENTS.md`**: submodule `agency-agents`, clone, `agency-agents.path`, or default `~/.claude/agents`.

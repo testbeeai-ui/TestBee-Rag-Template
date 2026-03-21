@@ -25,10 +25,15 @@ UPLOAD TARGET:
     - If SUPABASE_URL + SUPABASE_SERVICE_KEY present in .env → uploads to Supabase
     - Otherwise → uploads to local ChromaDB (for testing)
 
-Run from testbee_local/:
-    python run_ingest.py
+Run from project root:
+    python run_ingest.py              # all PDFs (no subject filter unless INGEST_SUBJECT is set)
+    python run_ingest.py --all        # all PDFs; ignores INGEST_SUBJECT in .env
+    python run_ingest.py --subject maths   # only .../maths/*.pdf under each class
+
+Optional .env: INGEST_SUBJECT=maths limits runs unless you pass --all.
 """
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -39,9 +44,37 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# Docling pulls layout/table models from Hugging Face on first use. Forcing
+# HF offline here caused every PDF to fail with:
+#   "outgoing traffic has been disabled ... set HF_HUB_OFFLINE=0"
+# Opt-in only when everything is already cached (air-gapped machines):
+#   set TESTBEE_HF_OFFLINE=1 in .env
+if os.environ.get("TESTBEE_HF_OFFLINE", "").strip().lower() in ("1", "true", "yes"):
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+# Windows (no Developer Mode / symlink privilege): Hugging Face Hub may try to
+# create symlinks in ~/.cache/huggingface and fail with WinError 1314.
+# Tell the hub to use file copies instead (uses more disk, works without admin).
+# Opt out: enable Windows Developer Mode and set TESTBEE_HF_ALLOW_SYMLINKS=1
+if os.name == "nt" and os.environ.get("TESTBEE_HF_ALLOW_SYMLINKS", "").strip().lower() not in (
+    "1",
+    "true",
+    "yes",
+):
+    os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+    try:
+        import huggingface_hub.file_download as _hf_file_download
+
+        def _hf_symlinks_disabled(_cache_dir=None) -> bool:  # noqa: ANN001
+            return False
+
+        _hf_file_download.are_symlinks_supported = _hf_symlinks_disabled
+        _hf_file_download._are_symlinks_supported_in_dir.clear()
+    except Exception:
+        pass
+
 from config import DocumentMetadata, RAW_PDFS_DIR
-from ingest import ingest_document
-from embed import load_model, embed_chunks
 
 # ---------------------------------------------------------------------------
 # NCERT chapter name lookup — keyed by filename stem (no extension).
@@ -70,7 +103,7 @@ CHAPTER_MAP: dict[str, str] = {
     "keph2an": "Answers Part 2",
     "keph2ps": "Prelims Part 2",
 
-    # --- CBSE Class 12 Physics (add when you drop the PDFs) ---
+    # --- CBSE Class 12 Physics ---
     "leph101": "Electric Charges and Fields",
     "leph102": "Electrostatic Potential and Capacitance",
     "leph103": "Current Electricity",
@@ -85,8 +118,11 @@ CHAPTER_MAP: dict[str, str] = {
     "leph204": "Atoms",
     "leph205": "Nuclei",
     "leph206": "Semiconductor Electronics",
+    "leph1an": "Answers Part 1",
+    "leph1ps": "Prelims Part 1",
+    "leph2ps": "Prelims Part 2",
 
-    # --- CBSE Class 11 Chemistry (add when ready) ---
+    # --- CBSE Class 11 Chemistry ---
     "kech101": "Some Basic Concepts of Chemistry",
     "kech102": "Structure of Atom",
     "kech103": "Classification of Elements and Periodicity",
@@ -97,17 +133,24 @@ CHAPTER_MAP: dict[str, str] = {
     "kech108": "Organic Chemistry: Basic Principles",
     "kech109": "Hydrocarbons",
 
-    # --- CBSE Class 12 Chemistry (add when ready) ---
+    # --- CBSE Class 12 Chemistry ---
     "lech101": "Solutions",
     "lech102": "Electrochemistry",
     "lech103": "Chemical Kinetics",
-    "lech104": "d and f Block Elements",
+    "lech104": "The d- and f-Block Elements",
     "lech105": "Coordination Compounds",
-    "lech106": "Haloalkanes and Haloarenes",
-    "lech107": "Alcohols, Phenols and Ethers",
-    "lech108": "Aldehydes, Ketones and Carboxylic Acids",
+    "lech201": "Haloalkanes and Haloarenes",
+    "lech202": "Alcohols, Phenols and Ethers",
+    "lech203": "Aldehydes, Ketones and Carboxylic Acids",
+    "lech204": "Amines",
+    "lech205": "Biomolecules",
+    "lech1a1": "Appendices Part 1",
+    "lech1an": "Answers Part 1",
+    "lech1ps": "Prelims Part 1",
+    "lech2an": "Answers Part 2",
+    "lech2ps": "Prelims Part 2",
 
-    # --- CBSE Class 11 Maths (add when ready) ---
+    # --- CBSE Class 11 Maths ---
     "kemh101": "Sets",
     "kemh102": "Relations and Functions",
     "kemh103": "Trigonometric Functions",
@@ -123,20 +166,28 @@ CHAPTER_MAP: dict[str, str] = {
     "kemh113": "Statistics",
     "kemh114": "Probability",
 
-    # --- CBSE Class 12 Maths (add when ready) ---
+    # --- CBSE Class 12 Maths Part 1 ---
     "lemh101": "Relations and Functions",
     "lemh102": "Inverse Trigonometric Functions",
     "lemh103": "Matrices",
     "lemh104": "Determinants",
     "lemh105": "Continuity and Differentiability",
     "lemh106": "Application of Derivatives",
-    "lemh107": "Integrals",
-    "lemh108": "Application of Integrals",
-    "lemh109": "Differential Equations",
-    "lemh110": "Vector Algebra",
-    "lemh111": "Three Dimensional Geometry",
-    "lemh112": "Linear Programming",
-    "lemh113": "Probability",
+    "lemh1a1": "Appendices Part 1",
+    "lemh1a2": "Appendices Part 2",
+    "lemh1an": "Answers Part 1",
+    "lemh1ps": "Prelims Part 1",
+
+    # --- CBSE Class 12 Maths Part 2 ---
+    "lemh201": "Integrals",
+    "lemh202": "Application of Integrals",
+    "lemh203": "Differential Equations",
+    "lemh204": "Vector Algebra",
+    "lemh205": "Three Dimensional Geometry",
+    "lemh206": "Linear Programming",
+    "lemh207": "Probability",
+    "lemh2an": "Answers Part 2",
+    "lemh2ps": "Prelims Part 2",
 }
 
 
@@ -185,6 +236,23 @@ def detect_metadata(pdf_path: Path) -> DocumentMetadata | None:
     except Exception as exc:
         print(f"  [SKIP] {pdf_path.name} — could not detect metadata: {exc}")
         return None
+
+
+def pdf_matches_subject_folder(pdf_path: Path, subject_folder: str) -> bool:
+    """
+    True if PDF is under raw_pdfs/<curriculum>/<classXX>/<subject>/file.pdf
+    and the subject folder matches (case-insensitive), e.g. 'maths'.
+    """
+    subject_folder = subject_folder.strip().lower()
+    if not subject_folder:
+        return True
+    try:
+        rel = pdf_path.relative_to(RAW_PDFS_DIR)
+        if len(rel.parts) != 4:
+            return False
+        return rel.parts[2].lower() == subject_folder
+    except ValueError:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -242,79 +310,169 @@ def upload_to_chromadb(all_rows: list[dict]) -> None:
 # Main
 # ---------------------------------------------------------------------------
 
+def _parse_cli_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="Ingest NCERT PDFs from data/raw_pdfs into Supabase or ChromaDB.",
+    )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help=(
+            "Ingest every PDF under raw_pdfs/physics/chemistry/maths/etc. "
+            "Ignores INGEST_SUBJECT in .env (use this for a full corpus run)."
+        ),
+    )
+    p.add_argument(
+        "--subject",
+        metavar="FOLDER",
+        help=(
+            "Only process PDFs in this subject folder (e.g. maths → "
+            ".../class11/maths/*.pdf). Case-insensitive. Overrides INGEST_SUBJECT."
+        ),
+    )
+    return p.parse_args()
+
+
 def main() -> None:
+    args = _parse_cli_args()
+    if args.all:
+        if args.subject:
+            print("Note: --all is set; ignoring --subject.\n")
+        subject_only = ""
+    else:
+        subject_only = (args.subject or os.getenv("INGEST_SUBJECT", "")).strip()
+
     print("=" * 60)
-    print("Testbee Ingestion Runner")
+    print("Testbee Ingestion Runner — 3-Phase GPU Pipeline")
     print("=" * 60)
 
-    # Detect upload target
     use_supabase = bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_SERVICE_KEY"))
     target = "Supabase" if use_supabase else "ChromaDB (local)"
     print(f"\nUpload target: {target}")
 
-    # Discover all PDFs
     all_pdfs = sorted(RAW_PDFS_DIR.rglob("*.pdf"))
-    print(f"Found {len(all_pdfs)} PDFs under {RAW_PDFS_DIR}\n")
+    if subject_only:
+        before = len(all_pdfs)
+        all_pdfs = [p for p in all_pdfs if pdf_matches_subject_folder(p, subject_only)]
+        print(
+            f"Subject filter '{subject_only}': {len(all_pdfs)} PDF(s) "
+            f"(of {before} under {RAW_PDFS_DIR})\n"
+        )
+    else:
+        print(
+            f"Found {len(all_pdfs)} PDFs under {RAW_PDFS_DIR} "
+            f"(no subject filter — all subjects/grades)\n"
+        )
 
     if not all_pdfs:
-        print("No PDFs found. Drop your textbook PDFs into:")
+        print("No PDFs found. Drop your PDFs into:")
         print("  data/raw_pdfs/cbse/class11/physics/")
-        print("  data/raw_pdfs/cbse/class11/chemistry/")
-        print("  data/raw_pdfs/cbse/class11/maths/")
-        print("  data/raw_pdfs/cbse/class12/physics/  ... etc.")
+        print("  data/raw_pdfs/cbse/class12/chemistry/  etc.")
+        if subject_only:
+            print(f"\n(With --subject {subject_only!r}, only matching subject folders count.)")
         return
 
-    # Load BGE-M3 model once
-    print("Loading BGE-M3 model...")
-    model = load_model()
-    print("Model loaded.\n")
+    # ------------------------------------------------------------------
+    # PHASE 1 — Docling PDF parsing on GPU
+    # Parse ALL PDFs first before loading the embedding model.
+    # This frees VRAM after Docling finishes before BGE-M3 loads.
+    # ------------------------------------------------------------------
+    print("=" * 60)
+    print("PHASE 1 / 3 — Parsing PDFs with Docling (GPU)")
+    print("=" * 60)
 
-    all_rows: list[dict] = []
+    print("Loading Docling library...", flush=True)
+    from ingest import initialize_converter, convert_pdf, chunk_document, inject_metadata
+    print("Initializing Docling converter on GPU...", flush=True)
+    converter = initialize_converter()
+    print("Docling ready.\n", flush=True)
 
-    for pdf_path in all_pdfs:
-        print(f"[{pdf_path.relative_to(RAW_PDFS_DIR)}]")
+    parsed: list[tuple[list[str], list[dict]]] = []   # (texts, metadatas) per pdf
+    total_chunks = 0
+
+    for i, pdf_path in enumerate(all_pdfs, 1):
+        rel = pdf_path.relative_to(RAW_PDFS_DIR)
+        print(f"\n[{i}/{len(all_pdfs)}] {rel}", flush=True)
 
         metadata = detect_metadata(pdf_path)
         if metadata is None:
             continue
 
-        print(f"  curriculum={metadata.curriculum}  grade={metadata.grade_level}"
-              f"  subject={metadata.subject}  chapter={metadata.chapter}")
+        print(f"  {metadata.curriculum} | Class {metadata.grade_level} | "
+              f"{metadata.subject} | {metadata.chapter}", flush=True)
+        print(f"  Parsing...", flush=True)
 
-        print(f"  Ingesting with Docling...")
-        chunks = ingest_document(pdf_path, metadata)
-        print(f"  {len(chunks)} chunks extracted.")
-
-        if not chunks:
-            print(f"  WARNING: no chunks — skipping.\n")
+        try:
+            doc    = convert_pdf(converter, pdf_path)
+            chunks = chunk_document(doc)
+            pairs  = inject_metadata(chunks, metadata)
+        except Exception as exc:
+            print(f"  ERROR: {exc} — skipping.")
             continue
 
-        texts     = [c[0] for c in chunks]
-        metadatas = [c[1] for c in chunks]
+        if not pairs:
+            print("  WARNING: 0 chunks extracted — skipping.")
+            continue
 
-        print(f"  Embedding {len(texts)} chunks...")
-        embeddings = embed_chunks(texts, model)
+        texts     = [p[0] for p in pairs]
+        metadatas = [p[1] for p in pairs]
+        parsed.append((texts, metadatas))
+        total_chunks += len(texts)
+        print(f"  {len(texts)} chunks extracted. (running total: {total_chunks})")
 
-        for text, meta, emb in zip(texts, metadatas, embeddings):
-            all_rows.append({
-                "text":            text,
-                "embedding":       emb,
-                "source_file":     meta.get("source_file", ""),
-                "curriculum":      meta.get("curriculum", ""),
-                "grade_level":     meta.get("grade_level", 0),
-                "subject":         meta.get("subject", ""),
-                "chapter":         meta.get("chapter", ""),
-                "page_number":     meta.get("page_number", -1),
-                "section_heading": meta.get("section_heading", ""),
-            })
-
-        print(f"  Done. {len(texts)} chunks ready.\n")
-
-    if not all_rows:
-        print("No chunks produced. Check your PDFs.")
+    if not parsed:
+        print("No chunks produced from any PDF.")
         return
 
-    print(f"\nTotal chunks ready to upload: {len(all_rows)}")
+    print(f"\nPhase 1 complete. {total_chunks} total chunks from {len(parsed)} PDFs.")
+
+    # ------------------------------------------------------------------
+    # PHASE 2 — BGE-M3 embedding on GPU
+    # Docling models are now unloaded; load BGE-M3 into VRAM.
+    # Embed all chunks in one pass for maximum GPU throughput.
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print("PHASE 2 / 3 — Embedding all chunks with BGE-M3 (CUDA GPU — install torch+cu124 if needed)")
+    print("=" * 60)
+
+    import torch
+    from embed import load_model, embed_chunks
+
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    model = load_model()
+
+    # Flatten all texts for a single encode pass
+    all_texts     = [t for texts, _ in parsed for t in texts]
+    all_metadatas = [m for _, metas in parsed for m in metas]
+
+    print(f"\nEmbedding {len(all_texts)} chunks...")
+    all_embeddings = embed_chunks(all_texts, model)
+    print(f"Embedding complete.")
+
+    # Build upload rows
+    all_rows = [
+        {
+            "text":            text,
+            "embedding":       emb,
+            "source_file":     meta.get("source_file", ""),
+            "curriculum":      meta.get("curriculum", ""),
+            "grade_level":     meta.get("grade_level", 0),
+            "subject":         meta.get("subject", ""),
+            "chapter":         meta.get("chapter", ""),
+            "page_number":     meta.get("page_number", -1),
+            "section_heading": meta.get("section_heading", ""),
+        }
+        for text, meta, emb in zip(all_texts, all_metadatas, all_embeddings)
+    ]
+
+    # ------------------------------------------------------------------
+    # PHASE 3 — Upload to Supabase / ChromaDB
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 60)
+    print(f"PHASE 3 / 3 — Uploading {len(all_rows)} chunks to {target}")
+    print("=" * 60)
 
     if use_supabase:
         upload_to_supabase(all_rows)
@@ -322,7 +480,7 @@ def main() -> None:
         upload_to_chromadb(all_rows)
 
     print("\n" + "=" * 60)
-    print(f"Ingestion complete. {len(all_rows)} chunks uploaded to {target}.")
+    print(f"ALL DONE. {len(all_rows)} chunks stored in {target}.")
     print("=" * 60)
 
 

@@ -29,26 +29,22 @@ query_collection() returns:
 The distance convention (higher = more relevant) matches what the Postgres
 match_chunks function returns:  1 - (embedding <=> query_embedding).
 
-generate.py filters on `distance <= 0.55`, which was calibrated against
-ChromaDB's cosine DISTANCE (lower = better).  Cosine similarity and cosine
-distance are related by:  similarity = 1 - distance.
+generate.py scoring (see generate_answer):
+    • ChromaDB retrieve.py: pass retrieval_score_higher_is_better=False — field is
+      cosine distance; chunks kept when distance <= 0.55.
+    • Supabase (this module): telegram_bot passes retrieval_score_higher_is_better=True —
+      field is cosine similarity; chunks kept when distance >= 0.45 (equivalent cutoff).
 
-So a ChromaDB distance of 0.55  ↔  a Supabase similarity of 0.45.
-The threshold in generate.py will need updating once you switch fully, but the
-data shape returned here is identical so both backends can co-exist during
-a gradual rollout.  See MIGRATION_NOTE.md if you want to track this.
+Both backends can coexist during migration; the bot must use the flag that matches
+the active retrieve implementation.
 
 SWITCHING THE BOT
 -----------------
-In telegram_bot.py, replace:
-
-    import retrieve
-
-with:
+telegram_bot.py should use:
 
     import supabase_retrieve as retrieve
 
-Everything else stays the same.
+(Replacing `import retrieve` when you are on Supabase.)
 
 PREREQUISITES
 -------------

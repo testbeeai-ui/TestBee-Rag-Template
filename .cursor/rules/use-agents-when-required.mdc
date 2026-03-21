@@ -1,0 +1,11 @@
+---
+description: Use specialist .mdc agent rules when the task needs that expertise; stay concise when it does not.
+alwaysApply: true
+---
+
+# Use agents when required
+
+- **When to lean on specialists** — For work that clearly needs deep expertise, follow the matching project rule under `.cursor/rules/*.mdc` (e.g. `security-engineer.mdc`, `frontend-developer.mdc`, `ai-engineer.mdc`, `software-architect.mdc`, `technical-writer.mdc`, testing rules). Cursor may attach them by relevance; if the right guidance is missing for this turn, **read** that `.mdc` file and apply it for the task.
+- **When not to** — Simple fixes (typos, tiny refactors, factual one-offs) do **not** need a specialist framing; answer directly.
+- **Heuristics** — Auth, API routes, prompts, RAG, ingestion, secrets → security / backend / AI-flavored rules. UI components → frontend / UX rules. Big design choices → architect. Docs-only → technical writer.
+- **External playbooks** — If the user asks for a Claude markdown agent from **`agency-agents/`** or `~/.claude/agents`, use **`claude-agents-bridge.mdc`** resolution order.
